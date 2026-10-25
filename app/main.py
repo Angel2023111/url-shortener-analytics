@@ -1,10 +1,9 @@
-
 import os
 import secrets
 import string
 from collections.abc import Generator
 
-from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status, Query
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,8 +13,13 @@ from app.models import URL
 from app.schemas import URLCreate, URLResponse
 
 from datetime import datetime, timezone
+from datetime import timedelta
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
+
+from app.click_models import Click
+
+from sqlalchemy import func, select
 
 app = FastAPI(
     title="URL Shortener API",
@@ -97,23 +101,21 @@ def create_url(
     )
 
 
+
 @app.get("/{short_code}")
 def redirect_url(
     short_code: str,
     db: Session = Depends(get_db),
 ):
-    # Find the URL associated with this short code.
     statement = select(URL).where(URL.short_code == short_code)
     url = db.scalar(statement)
 
-    # Unknown short codes should return 404.
     if url is None:
         raise HTTPException(
             status_code=404,
             detail="Short URL not found",
         )
 
-    # Expired links should no longer redirect.
     now = datetime.now(timezone.utc)
 
     if url.expires_at is not None and url.expires_at <= now:
@@ -122,9 +124,97 @@ def redirect_url(
             detail="This short URL has expired",
         )
 
-    # Send the visitor to the original destination.
+    # Record the visit only after the URL is confirmed valid.
+    click = Click(url_id=url.id)
+    db.add(click)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
     return RedirectResponse(
         url=url.original_url,
         status_code=307,
     )
+
+
+@app.get("/api/urls/{short_code}/analytics")
+def get_url_analytics(
+    short_code: str,
+    db: Session = Depends(get_db),
+):
+    url = db.scalar(
+        select(URL).where(URL.short_code == short_code)
+    )
+
+    if url is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Short URL not found",
+        )
+
+    total_clicks = db.scalar(
+        select(func.count(Click.id))
+        .where(Click.url_id == url.id)
+    )
+
+    return {
+        "short_code": url.short_code,
+        "original_url": url.original_url,
+        "created_at": url.created_at,
+        "expires_at": url.expires_at,
+        "total_clicks": total_clicks,
+    }
+
+
+@app.get("/api/urls/{short_code}/analytics/daily")
+def get_daily_analytics(
+    short_code: str,
+    days: int = Query(default=7, ge=1, le=90),
+    db: Session = Depends(get_db),
+):
+    url = db.scalar(
+        select(URL).where(URL.short_code == short_code)
+    )
+
+    if url is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Short URL not found",
+        )
+
+    # Group clicks by UTC calendar day.
+    click_day = func.date_trunc(
+        "day",
+        func.timezone("UTC", Click.clicked_at),
+    ).label("day")
+
+    
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+    statement = (
+        select(click_day, func.count(Click.id).label("clicks"))
+        .where(
+            Click.url_id == url.id,
+            Click.clicked_at >= cutoff,
+        )
+        .group_by(click_day)
+        .order_by(click_day)
+    )
+
+    rows = db.execute(statement).all()
+
+    return {
+        "short_code": url.short_code,
+        "period_days": days,
+        "daily_clicks": [
+            {
+                "date": row.day.date().isoformat(),
+                "clicks": row.clicks,
+            }
+            for row in rows
+        ],
+    }
 
