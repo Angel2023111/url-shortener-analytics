@@ -27,6 +27,8 @@ from app.cache import (
     invalidate_cached_url,
 )
 
+from app.rate_limit import rate_limit_url_creation
+
 app = FastAPI(
     title="URL Shortener API",
     description="A URL shortening and click analytics service.",
@@ -66,6 +68,7 @@ def database_health(db: Session = Depends(get_db)):
     "/api/urls",
     response_model=URLResponse,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit_url_creation)],
 )
 def create_url(
     request: URLCreate,
