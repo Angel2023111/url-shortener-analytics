@@ -21,6 +21,12 @@ from app.click_models import Click
 
 from sqlalchemy import func, select
 
+from app.cache import (
+    get_cached_url,
+    set_cached_url,
+    invalidate_cached_url,
+)
+
 app = FastAPI(
     title="URL Shortener API",
     description="A URL shortening and click analytics service.",
@@ -102,30 +108,72 @@ def create_url(
 
 
 
+
 @app.get("/{short_code}")
-def redirect_url(
-    short_code: str,
-    db: Session = Depends(get_db),
-):
-    statement = select(URL).where(URL.short_code == short_code)
-    url = db.scalar(statement)
+def redirect_url(short_code: str, db: Session = Depends(get_db)):
+    # 1. Try Redis first.
+    cached_data = get_cached_url(short_code)
 
-    if url is None:
-        raise HTTPException(
-            status_code=404,
-            detail="Short URL not found",
+    if cached_data is not None:
+        try:
+            url_id = cached_data["url_id"]
+            original_url = cached_data["original_url"]
+
+            expires_at_raw = cached_data["expires_at"]
+            expires_at = (
+                datetime.fromisoformat(expires_at_raw)
+                if expires_at_raw is not None
+                else None
+            )
+        except (KeyError, ValueError, TypeError):
+            # Invalid cache data: discard it and use PostgreSQL.
+            invalidate_cached_url(short_code)
+            cached_data = None
+
+    # 2. Cache miss or Redis failure: query PostgreSQL.
+    if cached_data is None:
+        statement = select(URL).where(
+            URL.short_code == short_code
         )
+        url = db.scalar(statement)
 
+        if url is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Short URL not found",
+            )
+
+        url_id = url.id
+        original_url = url.original_url
+        expires_at = url.expires_at
+
+    # 3. Check expiration on BOTH cache hits and cache misses.
     now = datetime.now(timezone.utc)
 
-    if url.expires_at is not None and url.expires_at <= now:
+    if expires_at is not None and expires_at <= now:
+        invalidate_cached_url(short_code)
         raise HTTPException(
             status_code=410,
             detail="This short URL has expired",
         )
 
-    # Record the visit only after the URL is confirmed valid.
-    click = Click(url_id=url.id)
+    # 4. Cache valid database results.
+    if cached_data is None:
+        set_cached_url(
+            short_code,
+            {
+                "url_id": url_id,
+                "original_url": original_url,
+                "expires_at": (
+                    expires_at.isoformat()
+                    if expires_at is not None
+                    else None
+                ),
+            },
+        )
+
+    # 5. Record EVERY successful redirect in PostgreSQL.
+    click = Click(url_id=url_id)
     db.add(click)
 
     try:
@@ -134,10 +182,12 @@ def redirect_url(
         db.rollback()
         raise
 
+    # 6. Return the original redirect response.
     return RedirectResponse(
-        url=url.original_url,
+        url=original_url,
         status_code=307,
     )
+
 
 
 @app.get("/api/urls/{short_code}/analytics")
