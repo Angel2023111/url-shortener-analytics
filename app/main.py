@@ -33,9 +33,21 @@ from app.celery_app import celery_app
 from app.tasks import refresh_url_analytics
 
 app = FastAPI(
-    title="URL Shortener API",
-    description="A URL shortening and click analytics service.",
-    version="0.2.0",
+    title="URL Shortener & Analytics API",
+    description="""
+    API for creating short URLs, redirecting visitors, and tracking clicks.
+
+    ## Features
+    - Create short URLs with input validation and rate limiting.
+    - Redirect visitors to original URLs.
+    - Track total and daily click analytics.
+    - Cache redirect lookups using Redis.
+    - Refresh analytics asynchronously using Celery.
+    """,
+    version="1.0.0",
+    contact={
+        "name": "API Support",
+    },
 )
 
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
@@ -101,7 +113,6 @@ def create_url(
 
         except IntegrityError as exc:
             db.rollback()
-            print("DATABASE INTEGRITY ERROR:", exc.orig)
             raise HTTPException(
                 status_code=500,
                 detail="Database constraint violation.",
