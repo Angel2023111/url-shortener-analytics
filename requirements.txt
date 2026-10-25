@@ -4,3 +4,4 @@ sqlalchemy
 psycopg[binary]
 pydantic-settings
 redis>=5.0,<7
+celery[redis]>=5.4,<6

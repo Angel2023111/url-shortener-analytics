@@ -29,6 +29,9 @@ from app.cache import (
 
 from app.rate_limit import rate_limit_url_creation
 
+from app.celery_app import celery_app
+from app.tasks import refresh_url_analytics
+
 app = FastAPI(
     title="URL Shortener API",
     description="A URL shortening and click analytics service.",
@@ -109,6 +112,32 @@ def create_url(
         detail="Could not generate a unique short code. Please retry.",
     )
 
+
+@app.post("/api/urls/{short_code}/analytics/refresh", status_code=202)
+def enqueue_analytics_refresh(short_code: str):
+    task = refresh_url_analytics.delay(short_code)
+
+    return {
+        "task_id": task.id,
+        "status": "PENDING",
+    }
+
+
+@app.get("/api/tasks/{task_id}")
+def get_task_status(task_id: str):
+    task = celery_app.AsyncResult(task_id)
+
+    response = {
+        "task_id": task.id,
+        "status": task.state,
+    }
+
+    if task.state == "SUCCESS":
+        response["result"] = task.result
+    elif task.state == "FAILURE":
+        response["error"] = "Background task failed"
+
+    return response
 
 
 
