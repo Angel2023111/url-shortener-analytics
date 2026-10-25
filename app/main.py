@@ -13,6 +13,10 @@ from app.database import SessionLocal
 from app.models import URL
 from app.schemas import URLCreate, URLResponse
 
+from datetime import datetime, timezone
+from fastapi.responses import RedirectResponse
+from sqlalchemy import select
+
 app = FastAPI(
     title="URL Shortener API",
     description="A URL shortening and click analytics service.",
@@ -91,3 +95,36 @@ def create_url(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         detail="Could not generate a unique short code. Please retry.",
     )
+
+
+@app.get("/{short_code}")
+def redirect_url(
+    short_code: str,
+    db: Session = Depends(get_db),
+):
+    # Find the URL associated with this short code.
+    statement = select(URL).where(URL.short_code == short_code)
+    url = db.scalar(statement)
+
+    # Unknown short codes should return 404.
+    if url is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Short URL not found",
+        )
+
+    # Expired links should no longer redirect.
+    now = datetime.now(timezone.utc)
+
+    if url.expires_at is not None and url.expires_at <= now:
+        raise HTTPException(
+            status_code=410,
+            detail="This short URL has expired",
+        )
+
+    # Send the visitor to the original destination.
+    return RedirectResponse(
+        url=url.original_url,
+        status_code=307,
+    )
+
