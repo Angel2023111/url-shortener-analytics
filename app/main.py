@@ -1,3 +1,4 @@
+import uuid
 import os
 import secrets
 import string
@@ -131,10 +132,12 @@ def enqueue_analytics_refresh(
     db: Session = Depends(get_db),
     api_key: APIKey = Depends(require_api_key),
 ):
-    task = refresh_url_analytics.delay(short_code)
+    # Generate the ID before publishing the task.
+    task_id = str(uuid.uuid4())
 
+    # Record ownership before the worker can start.
     ownership = TaskOwnership(
-        task_id=task.id,
+        task_id=task_id,
         api_key_id=api_key.id,
     )
 
@@ -148,8 +151,23 @@ def enqueue_analytics_refresh(
             detail="Could not record task ownership",
         )
 
+    # Publish using the same ID stored in the database.
+    try:
+        refresh_url_analytics.apply_async(
+            args=[short_code],
+            task_id=task_id,
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Could not confirm task publication",
+                "task_id": task_id,
+            },
+        )
+
     return {
-        "task_id": task.id,
+        "task_id": task_id,
         "status": "PENDING",
     }
 
