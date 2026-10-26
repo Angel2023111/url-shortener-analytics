@@ -32,6 +32,10 @@ from app.rate_limit import rate_limit_url_creation
 from app.celery_app import celery_app
 from app.tasks import refresh_url_analytics
 
+from app.database import SessionLocal, get_db
+
+from app.api_keys import require_api_key
+
 app = FastAPI(
     title="URL Shortener & Analytics API",
     description="""
@@ -53,13 +57,6 @@ app = FastAPI(
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
 ALPHABET = string.ascii_letters + string.digits
 
-
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 def generate_short_code(length: int = 7) -> str:
@@ -88,6 +85,7 @@ def database_health(db: Session = Depends(get_db)):
 def create_url(
     request: URLCreate,
     db: Session = Depends(get_db),
+    api_key=Depends(require_api_key),
 ):
     for _ in range(3):
         short_code = generate_short_code()

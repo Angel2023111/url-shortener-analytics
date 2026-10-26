@@ -85,3 +85,25 @@ def test_create_url_rejects_expiration_without_timezone(client):
     assert response.status_code == 422
 
 
+def test_create_url_rejects_missing_api_key(client):
+    response = client.post(
+        "/api/urls",
+        json={"original_url": "https://example.com/no-key"},
+        headers={"X-API-Key": ""},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Missing API key"
+
+
+def test_create_url_rejects_invalid_api_key(client):
+    response = client.post(
+        "/api/urls",
+        json={"original_url": "https://example.com/bad-key"},
+        headers={"X-API-Key": "definitely-not-a-valid-key"},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid or inactive API key"
+
+
