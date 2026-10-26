@@ -35,6 +35,8 @@ from app.tasks import refresh_url_analytics
 from app.database import SessionLocal, get_db
 
 from app.api_keys import require_api_key
+from app.task_ownership_models import TaskOwnership
+from app.api_key_models import APIKey
 
 app = FastAPI(
     title="URL Shortener & Analytics API",
@@ -124,8 +126,27 @@ def create_url(
 
 
 @app.post("/api/urls/{short_code}/analytics/refresh", status_code=202)
-def enqueue_analytics_refresh(short_code: str):
+def enqueue_analytics_refresh(
+    short_code: str,
+    db: Session = Depends(get_db),
+    api_key: APIKey = Depends(require_api_key),
+):
     task = refresh_url_analytics.delay(short_code)
+
+    ownership = TaskOwnership(
+        task_id=task.id,
+        api_key_id=api_key.id,
+    )
+
+    try:
+        db.add(ownership)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Could not record task ownership",
+        )
 
     return {
         "task_id": task.id,
@@ -137,8 +158,19 @@ def enqueue_analytics_refresh(short_code: str):
 @app.get("/api/tasks/{task_id}")
 def get_task_status(
     task_id: str,
-    api_key=Depends(require_api_key),
+    db: Session = Depends(get_db),
+    api_key: APIKey = Depends(require_api_key),
 ):
+    ownership = db.get(TaskOwnership, task_id)
+
+
+
+    if ownership is None or ownership.api_key_id != api_key.id:
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found",
+        )
+
     task = celery_app.AsyncResult(task_id)
 
     response = {
@@ -288,7 +320,7 @@ def get_daily_analytics(
         func.timezone("UTC", Click.clicked_at),
     ).label("day")
 
-    
+
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     statement = (

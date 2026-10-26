@@ -5,6 +5,12 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from app.database import Base
+import app.models
+import app.click_models
+import app.api_key_models
+import app.task_ownership_models
+
 # Require an explicit database target so migrations cannot
 # accidentally use the placeholder URL from alembic.ini.
 database_url = os.environ.get("DATABASE_URL")

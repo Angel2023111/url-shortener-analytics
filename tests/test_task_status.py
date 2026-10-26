@@ -2,10 +2,16 @@ from unittest.mock import Mock
 
 from app.celery_app import celery_app
 
+from app.api_key_models import APIKey
+from app.task_ownership_models import TaskOwnership
+
+import uuid
+
+
 
 def test_task_status_pending(client, monkeypatch):
     fake_task = Mock()
-    fake_task.id = "task-pending-123"
+    fake_task.id = f"task-pending-{uuid.uuid4()}"
     fake_task.state = "PENDING"
 
     monkeypatch.setattr(
@@ -13,19 +19,31 @@ def test_task_status_pending(client, monkeypatch):
         "AsyncResult",
         lambda task_id: fake_task,
     )
+    with client.app.state.TestingSessionLocal() as db:
+        api_key_id = client.app.state.TestAPIKeyID
 
-    response = client.get("/api/tasks/task-pending-123")
+        db.add(
+            TaskOwnership(
+                task_id=fake_task.id,
+                api_key_id=api_key_id,
+            )
+        )
+        db.commit()
+
+
+
+    response = client.get(f"/api/tasks/{fake_task.id}")
 
     assert response.status_code == 200
     assert response.json() == {
-        "task_id": "task-pending-123",
+        "task_id": fake_task.id,
         "status": "PENDING",
     }
 
 
 def test_task_status_success(client, monkeypatch):
     fake_task = Mock()
-    fake_task.id = "task-success-123"
+    fake_task.id = f"task-success-{uuid.uuid4()}"
     fake_task.state = "SUCCESS"
     fake_task.result = {
         "found": True,
@@ -39,11 +57,23 @@ def test_task_status_success(client, monkeypatch):
         lambda task_id: fake_task,
     )
 
-    response = client.get("/api/tasks/task-success-123")
+    with client.app.state.TestingSessionLocal() as db:
+        api_key_id = client.app.state.TestAPIKeyID
+
+        db.add(
+            TaskOwnership(
+                task_id=fake_task.id,
+                api_key_id=api_key_id,
+            )
+        )
+        db.commit()
+
+
+    response = client.get(f"/api/tasks/{fake_task.id}")
 
     assert response.status_code == 200
     assert response.json() == {
-        "task_id": "task-success-123",
+        "task_id": fake_task.id,
         "status": "SUCCESS",
         "result": {
             "found": True,
@@ -55,7 +85,7 @@ def test_task_status_success(client, monkeypatch):
 
 def test_task_status_failure(client, monkeypatch):
     fake_task = Mock()
-    fake_task.id = "task-failure-123"
+    fake_task.id = f"task-failure-{uuid.uuid4()}"
     fake_task.state = "FAILURE"
 
     monkeypatch.setattr(
@@ -64,11 +94,22 @@ def test_task_status_failure(client, monkeypatch):
         lambda task_id: fake_task,
     )
 
-    response = client.get("/api/tasks/task-failure-123")
+    with client.app.state.TestingSessionLocal() as db:
+        api_key_id = client.app.state.TestAPIKeyID
+
+        db.add(
+            TaskOwnership(
+                task_id=fake_task.id,
+                api_key_id=api_key_id,
+            )
+        )
+        db.commit()
+
+    response = client.get(f"/api/tasks/{fake_task.id}")
 
     assert response.status_code == 200
     assert response.json() == {
-        "task_id": "task-failure-123",
+        "task_id": fake_task.id,
         "status": "FAILURE",
         "error": "Background task failed",
     }

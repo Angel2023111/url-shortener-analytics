@@ -28,19 +28,23 @@ def client():
         expire_on_commit=False,
     )
 
+    fastapi_app.state.TestingSessionLocal = TestingSessionLocal
+
     Base.metadata.create_all(bind=test_engine)
 
     raw_key = generate_api_key()
 
     with TestingSessionLocal() as db:
-        db.add(
-            APIKey(
-                key_hash=hash_api_key(raw_key),
-                name="pytest-client",
-                is_active=True,
-            )
+        api_key = APIKey(
+            key_hash=hash_api_key(raw_key),
+            name=f"pytest-client-{raw_key[:8]}",
+            is_active=True,
         )
+        db.add(api_key)
         db.commit()
+        db.refresh(api_key)
+
+        fastapi_app.state.TestAPIKeyID = api_key.id
 
     def override_get_db():
         db = TestingSessionLocal()
