@@ -95,6 +95,7 @@ def create_url(
         url = URL(
             short_code=short_code,
             original_url=str(request.original_url),
+            expires_at=request.expires_at,
         )
 
         try:

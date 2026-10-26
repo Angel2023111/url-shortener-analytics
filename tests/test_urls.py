@@ -1,5 +1,3 @@
-
-
 import os
 
 
@@ -9,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.main import app
 from app.models import URL
 
-
+from datetime import datetime, timedelta, timezone
 
 def test_create_url_rejects_invalid_url(client):
     response = client.post(
@@ -44,4 +42,46 @@ def test_create_url_persists_record(client):
             assert saved_url.original_url == data["original_url"]
     finally:
         test_engine.dispose()
+
+
+def test_create_url_with_future_expiration(client):
+    expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+
+    response = client.post(
+        "/api/urls",
+        json={
+            "original_url": "https://example.com/expiring",
+            "expires_at": expires_at.isoformat(),
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["expires_at"] is not None
+
+
+def test_create_url_rejects_past_expiration(client):
+    expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+
+    response = client.post(
+        "/api/urls",
+        json={
+            "original_url": "https://example.com/expired",
+            "expires_at": expires_at.isoformat(),
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_url_rejects_expiration_without_timezone(client):
+    response = client.post(
+        "/api/urls",
+        json={
+            "original_url": "https://example.com/no-timezone",
+            "expires_at": "2026-11-01T18:00:00",
+        },
+    )
+
+    assert response.status_code == 422
+
 

@@ -106,3 +106,60 @@ def test_redirect_expired_url_returns_410(client, monkeypatch):
 
     assert response.status_code == 410
     assert response.json()["detail"] == "This short URL has expired"
+
+
+def test_redirects_url_with_future_expiration(client, monkeypatch):
+    expires_at = datetime.now(timezone.utc) + timedelta(days=1)
+    short_code, _ = insert_test_url(
+        "https://example.com/future",
+        expires_at=expires_at,
+    )
+
+    monkeypatch.setattr(
+        main_module, "get_cached_url", lambda code: None
+    )
+    monkeypatch.setattr(
+        main_module, "set_cached_url", lambda code, data: None
+    )
+    monkeypatch.setattr(
+        main_module, "invalidate_cached_url", lambda code: None
+    )
+
+    response = client.get(
+        f"/{short_code}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 307
+    assert response.headers["location"] == "https://example.com/future"
+
+
+def test_cached_expired_url_returns_410(client, monkeypatch):
+    expired_at = datetime.now(timezone.utc) - timedelta(days=1)
+    short_code, url_id = insert_test_url(
+        "https://example.com/cached-expired",
+        expires_at=expired_at,
+    )
+
+    # Simulate Redis returning a cached URL that has expired.
+    monkeypatch.setattr(
+        main_module,
+        "get_cached_url",
+        lambda code: {
+            "url_id": url_id,
+            "original_url": "https://example.com/cached-expired",
+            "expires_at": expired_at.isoformat(),
+        },
+    )
+    monkeypatch.setattr(
+        main_module, "invalidate_cached_url", lambda code: None
+    )
+
+    response = client.get(
+        f"/{short_code}",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 410
+    assert response.json()["detail"] == "This short URL has expired"
+
