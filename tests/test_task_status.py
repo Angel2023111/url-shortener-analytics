@@ -159,7 +159,7 @@ def test_task_status_cannot_access_another_api_keys_task(client, monkeypatch):
     with client.app.state.TestingSessionLocal() as db:
         other_api_key = APIKey(
             name=f"other-owner-{uuid.uuid4()}",
-            key_hash="test-hash-not-used-for-authentication",
+            key_hash=f"test-hash-{uuid.uuid4()}",
         )
         db.add(other_api_key)
         db.flush()

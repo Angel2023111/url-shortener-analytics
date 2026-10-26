@@ -158,13 +158,12 @@ def enqueue_analytics_refresh(
             task_id=task_id,
         )
     except Exception:
+        import logging
+        logging.exception("Failed to publish analytics task")
         raise HTTPException(
             status_code=503,
-            detail={
-                "message": "Could not confirm task publication",
-                "task_id": task_id,
-            },
-        )
+            detail="Could not publish analytics task. Please try again.",
+    )
 
     return {
         "task_id": task_id,
