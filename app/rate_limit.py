@@ -2,9 +2,11 @@
 import os
 import time
 
-from fastapi import HTTPException, Request, Response
+from fastapi import Depends, HTTPException, Response
 from redis.exceptions import RedisError
 
+from app.api_keys import require_api_key
+from app.api_key_models import APIKey
 from app.cache import redis_client
 
 
@@ -24,23 +26,20 @@ return current
 
 
 def rate_limit_url_creation(
-    request: Request,
     response: Response,
+    api_key: APIKey = Depends(require_api_key),
 ) -> None:
-    # Identify the client. This is suitable for local development.
-    client_ip = (
-        request.client.host
-        if request.client is not None
-        else "unknown"
-    )
-
+    # Give each authenticated API key its own quota.
     now = int(time.time())
     window_id = now // WINDOW_SECONDS
     seconds_until_reset = (
         WINDOW_SECONDS - (now % WINDOW_SECONDS)
     )
 
-    key = f"rate_limit:create_url:{client_ip}:{window_id}"
+    key = (
+        f"rate_limit:create_url:api_key:{api_key.id}:"
+        f"{window_id}"
+    )
 
     try:
         current_count = int(
@@ -52,8 +51,7 @@ def rate_limit_url_creation(
             )
         )
     except RedisError:
-        # Fail open: keep URL creation available if Redis is down.
-        # This temporarily means the rate limit cannot be enforced.
+        # Fail open if Redis is unavailable.
         return
 
     remaining = max(0, RATE_LIMIT - current_count)

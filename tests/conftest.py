@@ -59,3 +59,56 @@ def client():
 
     fastapi_app.dependency_overrides.clear()
     test_engine.dispose()
+
+
+
+@pytest.fixture
+def client_with_rate_limit():
+    database_url = os.environ["TEST_DATABASE_URL"]
+    test_engine = create_engine(database_url)
+
+    TestingSessionLocal = sessionmaker(
+        bind=test_engine,
+        autoflush=False,
+        expire_on_commit=False,
+    )
+
+    Base.metadata.create_all(bind=test_engine)
+
+    raw_keys = [generate_api_key(), generate_api_key()]
+
+    with TestingSessionLocal() as db:
+        db.add_all(
+            [
+                APIKey(
+                    key_hash=hash_api_key(raw_keys[0]),
+                    name="rate-limit-test-a",
+                    is_active=True,
+                ),
+                APIKey(
+                    key_hash=hash_api_key(raw_keys[1]),
+                    name="rate-limit-test-b",
+                    is_active=True,
+                ),
+            ]
+        )
+        db.commit()
+
+    def override_get_db():
+        db = TestingSessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    fastapi_app.dependency_overrides.pop(
+        rate_limit_url_creation, None
+    )
+    fastapi_app.dependency_overrides[get_db] = override_get_db
+
+    try:
+        with TestClient(fastapi_app) as test_client:
+            yield test_client, raw_keys
+    finally:
+        fastapi_app.dependency_overrides.clear()
+        test_engine.dispose()
