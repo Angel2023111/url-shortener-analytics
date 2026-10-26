@@ -133,8 +133,12 @@ def enqueue_analytics_refresh(short_code: str):
     }
 
 
+
 @app.get("/api/tasks/{task_id}")
-def get_task_status(task_id: str):
+def get_task_status(
+    task_id: str,
+    api_key=Depends(require_api_key),
+):
     task = celery_app.AsyncResult(task_id)
 
     response = {
@@ -148,6 +152,7 @@ def get_task_status(task_id: str):
         response["error"] = "Background task failed"
 
     return response
+
 
 
 
